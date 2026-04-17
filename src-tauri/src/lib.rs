@@ -20,7 +20,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(active_broker)
         .manage(broker_kill_switch)
         .manage(kill_switch_state)
