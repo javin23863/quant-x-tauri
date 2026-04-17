@@ -1,0 +1,1 @@
+export { useDashboardStore as useApp } from '../../store/dashboard';

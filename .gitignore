@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output (dist/index.html is our tracked loader page — see src-tauri/tauri.conf.json)
+dist/
+!dist/index.html
+
+# Rust
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
