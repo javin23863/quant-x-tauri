@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quant X</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: #050a14; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .shell { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 24px; }
+      .brand { font-size: 28px; font-weight: 600; letter-spacing: 2px; color: #60a5fa; }
+      .state { font-size: 14px; color: #94a3b8; }
+      .err { font-size: 13px; color: #f87171; max-width: 520px; text-align: center; line-height: 1.5; }
+      .dots::after { content: '.'; animation: dots 1.2s steps(3, end) infinite; }
+      @keyframes dots { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } }
+      button { background: #1e40af; color: #fff; border: 0; padding: 10px 18px; border-radius: 4px; font-size: 13px; cursor: pointer; font-family: inherit; }
+      button:hover { background: #2563eb; }
+      .meta { font-size: 11px; color: #475569; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="brand">QUANT&nbsp;X&nbsp;LIVE</div>
+      <div id="state" class="state dots">Connecting to Mission Control</div>
+      <div id="err" class="err" style="display:none"></div>
+      <button id="retry" style="display:none" onclick="location.reload()">Retry</button>
+      <div class="meta">http://127.0.0.1:3001</div>
+    </div>
+    <script>
+      const MC_URL = 'http://127.0.0.1:3001';
+      const PROBE = MC_URL + '/api/data/health';
+      const state = document.getElementById('state');
+      const err = document.getElementById('err');
+      const retry = document.getElementById('retry');
+      let attempts = 0;
+      const MAX_FAST = 30;
+
+      async function tick() {
+        attempts++;
+        try {
+          const r = await fetch(PROBE, { cache: 'no-store' });
+          if (r.ok) { window.location.replace(MC_URL + '/'); return; }
+        } catch (e) { /* keep polling */ }
+        if (attempts === MAX_FAST) {
+          state.classList.remove('dots');
+          state.textContent = 'Mission Control not responding';
+          err.style.display = 'block';
+          err.textContent = 'The backend process (PM2: mission-control) does not appear to be running on port 3001. Check pm2 status or run pm2 resurrect.';
+          retry.style.display = 'inline-block';
+        }
+        setTimeout(tick, attempts < MAX_FAST ? 500 : 2000);
+      }
+      tick();
+    </script>
+  </body>
+</html>

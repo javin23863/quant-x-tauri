@@ -1,8 +1,10 @@
 # Dependencies
 node_modules/
 
-# Build output (dist/index.html is our tracked loader page — see src-tauri/tauri.conf.json)
-dist/
+# Build output — ignore everything in dist/ EXCEPT our tracked loader page.
+# The loader (dist/index.html) is what Tauri ships as the initial window;
+# it polls Mission Control and redirects. See src-tauri/tauri.conf.json.
+dist/*
 !dist/index.html
 
 # Rust
