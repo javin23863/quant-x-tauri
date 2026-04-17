@@ -27,7 +27,7 @@
     </div>
     <script>
       const MC_URL = 'http://127.0.0.1:3001';
-      const PROBE = MC_URL + '/api/data/health';
+      const PROBE = MC_URL + '/api/health';
       const state = document.getElementById('state');
       const err = document.getElementById('err');
       const retry = document.getElementById('retry');
@@ -44,7 +44,7 @@
           state.classList.remove('dots');
           state.textContent = 'Mission Control not responding';
           err.style.display = 'block';
-          err.textContent = 'The backend process (PM2: mission-control) does not appear to be running on port 3001. Check pm2 status or run pm2 resurrect.';
+          err.textContent = 'The backend process (PM2: mission-control) is not answering health checks on port 3001. Check pm2 status or run pm2 resurrect.';
           retry.style.display = 'inline-block';
         }
         setTimeout(tick, attempts < MAX_FAST ? 500 : 2000);
