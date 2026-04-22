@@ -30,6 +30,8 @@ const MODEL_COLORS: Record<string, string> = {
 };
 
 const HANDS_FREE_STORAGE_KEY = 'mission-control:hands-free';
+const VOICE_MODEL = 'gemini-3-flash-preview:cloud';
+const OLLAMA_STREAM_URL = 'http://localhost:8118/ollama-chat-stream';
 
 function formatTime(iso: string): string {
   try {
@@ -178,6 +180,9 @@ export default function ChatView() {
   const sendMessageRef = useRef<typeof sendMessage | null>(null);
   const mountedRef = useRef(true);
   const timerRefs = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const sttsBufferRef = useRef<string>('');
+  const firstAudioStampRef = useRef<number | null>(null);
+  const speechEndStampRef = useRef<number | null>(null);
 
   const schedule = useCallback((fn: () => void, delay = 0) => {
     const timerId = setTimeout(() => {
@@ -226,7 +231,7 @@ export default function ChatView() {
     const speechText = toSpeechText(text);
     if (!speechText) {
       if (handsFreeEnabledRef.current && voiceSupport.canListen) {
-        schedule(() => startListening(), 150);
+        schedule(() => startListening(), 0);
       }
       return;
     }
@@ -234,7 +239,7 @@ export default function ChatView() {
     if (!voiceSupport.canSpeak || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') {
       setVoiceStatus(handsFreeEnabledRef.current ? 'Hands-free ready' : 'Hands-free off');
       if (handsFreeEnabledRef.current && voiceSupport.canListen) {
-        schedule(() => startListening(), 150);
+        schedule(() => startListening(), 0);
       }
       return;
     }
@@ -253,7 +258,7 @@ export default function ChatView() {
       setSpeaking(false);
       if (handsFreeEnabledRef.current && voiceSupport.canListen) {
         setVoiceStatus('Listening');
-        schedule(() => startListening(), 150);
+        schedule(() => startListening(), 50);
       } else {
         setVoiceStatus(handsFreeEnabledRef.current ? 'Hands-free ready' : 'Hands-free off');
       }
@@ -263,12 +268,50 @@ export default function ChatView() {
       setSpeaking(false);
       setVoiceStatus('Voice playback failed');
       if (handsFreeEnabledRef.current && voiceSupport.canListen) {
-        schedule(() => startListening(), 150);
+        schedule(() => startListening(), 50);
       }
     };
 
     window.speechSynthesis.speak(utterance);
   }, [schedule, startListening, voiceSupport.canListen, voiceSupport.canSpeak]);
+
+  const speakStreaming = useCallback((chunk: string) => {
+    if (!voiceSupport.canSpeak || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') {
+      return;
+    }
+    sttsBufferRef.current += chunk;
+    const SENT_RE = /[.!?](?=\s|$)/g;
+    let lastFlushEnd = 0;
+    let match: RegExpExecArray | null;
+    while ((match = SENT_RE.exec(sttsBufferRef.current)) !== null) {
+      const end = match.index + 1;
+      const sentence = sttsBufferRef.current.slice(lastFlushEnd, end).trim();
+      if (sentence) {
+        const utter = new window.SpeechSynthesisUtterance(toSpeechText(sentence));
+        utter.rate = 1;
+        utter.pitch = 1;
+        if (firstAudioStampRef.current === null) {
+          utter.onstart = () => { if (firstAudioStampRef.current === null) firstAudioStampRef.current = performance.now(); };
+        }
+        window.speechSynthesis.speak(utter);
+      }
+      lastFlushEnd = end;
+    }
+    if (lastFlushEnd > 0) {
+      sttsBufferRef.current = sttsBufferRef.current.slice(lastFlushEnd);
+    }
+  }, [voiceSupport.canSpeak]);
+
+  const flushStreamingTail = useCallback(() => {
+    const tail = sttsBufferRef.current.trim();
+    sttsBufferRef.current = '';
+    if (tail && voiceSupport.canSpeak && window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function') {
+      const utter = new window.SpeechSynthesisUtterance(toSpeechText(tail));
+      utter.rate = 1;
+      utter.pitch = 1;
+      window.speechSynthesis.speak(utter);
+    }
+  }, [voiceSupport.canSpeak]);
 
   useEffect(() => {
     const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -302,6 +345,7 @@ export default function ChatView() {
 
       setInputText(transcript);
       setVoiceStatus('Awaiting reply');
+      speechEndStampRef.current = performance.now();
       sendMessageRef.current?.(transcript);
     };
 
@@ -380,16 +424,13 @@ export default function ChatView() {
 
   async function fetchModels() {
     try {
-      const data = await invoke<ChatModel[]>('chat_models');
-      if (mountedRef.current) setModels(data);
-    } catch {
       if (!mountedRef.current) return;
       setModels([
-        { id: 'ai', name: 'AI', emoji: '🤖', role: 'Primary Interface', status: 'offline', model: 'glm-5:cloud', messageCount: 0 },
-        { id: 'research-director', name: 'Research Director', emoji: '📚', role: 'Hypothesis generation', status: 'offline', model: 'glm-5:cloud', messageCount: 0 },
-        { id: 'trade-manager', name: 'Trade Manager', emoji: '📈', role: 'Trade supervision', status: 'offline', model: 'glm-5:cloud', messageCount: 0 },
-        { id: 'mission-control', name: 'Mission Control', emoji: '🎛️', role: 'Final authority', status: 'offline', model: 'glm-5:cloud', messageCount: 0 },
-        { id: 'meta-harness', name: 'Meta Harness', emoji: '🧠', role: 'System governance advisory', status: 'offline', model: 'minimax-m2.7:cloud', messageCount: 0 },
+        { id: 'ai', name: 'AI', emoji: '🤖', role: 'Primary Interface', status: 'online', model: 'glm-5:cloud', messageCount: 0 },
+        { id: 'research-director', name: 'Research Director', emoji: '📚', role: 'Hypothesis generation', status: 'online', model: 'glm-5:cloud', messageCount: 0 },
+        { id: 'trade-manager', name: 'Trade Manager', emoji: '📈', role: 'Trade supervision', status: 'online', model: 'glm-5:cloud', messageCount: 0 },
+        { id: 'mission-control', name: 'Mission Control', emoji: '🎛️', role: 'Final authority', status: 'online', model: 'glm-5:cloud', messageCount: 0 },
+        { id: 'meta-harness', name: 'Meta Harness', emoji: '🧠', role: 'System governance advisory', status: 'online', model: 'minimax-m2.7:cloud', messageCount: 0 },
       ]);
     } finally {
       if (mountedRef.current) setModelsLoading(false);
@@ -421,6 +462,17 @@ export default function ChatView() {
       ...prev,
       [modelId]: [...(prev[modelId] || []), msg],
     }));
+  }
+
+  function updateMessage(modelId: string, msgId: string, patch: Partial<ChatMessage>) {
+    setChatHistories(prev => {
+      const msgs = prev[modelId] || [];
+      const idx = msgs.findIndex(m => m.id === msgId);
+      if (idx < 0) return prev;
+      const updated = [...msgs];
+      updated[idx] = { ...updated[idx], ...patch };
+      return { ...prev, [modelId]: updated };
+    });
   }
 
   function clearHistory(modelId: string) {
@@ -455,22 +507,95 @@ export default function ChatView() {
       .slice(-20)
       .map(m => ({ role: m.role, content: m.content }));
 
+    const voicePath = !!messageOverride && handsFreeEnabledRef.current;
+
     try {
-      const data = await invoke<{ id: string; content: string; tokens?: number; latencyMs?: number; timestamp: string; fallback?: string; error?: string }>('chat_send', {
-        model: selectedModel,
-        message: text,
-        history,
+      const assistantId = `a-${Date.now()}`;
+      addMessage(selectedModel, {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
       });
 
-      speechReply = data.content;
-      addMessage(selectedModel, {
-        id: data.id,
-        role: 'assistant',
-        content: data.content,
-        tokens: data.tokens,
-        latencyMs: data.latencyMs,
-        timestamp: data.timestamp,
+      const tSpeechEnd = speechEndStampRef.current ?? performance.now();
+      speechEndStampRef.current = null;
+
+      const modelInfo = models.find(m => m.id === selectedModel);
+      const actualModel = voicePath ? VOICE_MODEL : (modelInfo?.model || 'glm-5:cloud');
+
+      sttsBufferRef.current = '';
+      firstAudioStampRef.current = null;
+      if (voicePath && window.speechSynthesis) window.speechSynthesis.cancel();
+
+      const res = await fetch(OLLAMA_STREAM_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: actualModel,
+          messages: [...history, { role: 'user', content: text }],
+        }),
       });
+
+      if (!res.ok || !res.body) {
+        throw new Error(`Bridge returned ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accum = '';
+      let buf = '';
+      let tFirstChunk: number | null = null;
+
+      outer: while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const obj = JSON.parse(trimmed);
+            const delta = obj?.message?.content ?? '';
+            if (delta) {
+              if (tFirstChunk === null) tFirstChunk = performance.now();
+              accum += delta;
+              updateMessage(selectedModel, assistantId, { content: accum });
+              if (voicePath) speakStreaming(delta);
+            }
+            if (obj?.done) break outer;
+          } catch { /* ignore malformed line */ }
+        }
+      }
+
+      // Flush any residue in buf (final line without newline)
+      if (buf.trim()) {
+        try {
+          const obj = JSON.parse(buf.trim());
+          const delta = obj?.message?.content ?? '';
+          if (delta) {
+            accum += delta;
+            updateMessage(selectedModel, assistantId, { content: accum });
+            if (voicePath) speakStreaming(delta);
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (voicePath) flushStreamingTail();
+
+      const tStreamEnd = performance.now();
+      const latencyMs = voicePath
+        ? Math.round((firstAudioStampRef.current ?? tStreamEnd) - tSpeechEnd)
+        : Math.round(tStreamEnd - tSpeechEnd);
+      updateMessage(selectedModel, assistantId, { content: accum, latencyMs });
+
+      console.debug('[voice-latency]', {
+        voicePath, speechEnd: tSpeechEnd, firstChunk: tFirstChunk, streamEnd: tStreamEnd, firstAudio: firstAudioStampRef.current, latencyMs,
+      });
+
+      speechReply = accum;
     } catch (e: unknown) {
       resumeListening = handsFreeEnabledRef.current && voiceSupport.canListen;
       addMessage(selectedModel, {
@@ -484,11 +609,23 @@ export default function ChatView() {
       if (!mountedRef.current) return;
       setLoading(false);
       loadingRef.current = false;
-      if (handsFreeEnabledRef.current && speechReply) {
+      if (handsFreeEnabledRef.current && speechReply && !voicePath) {
         speakAssistantReply(speechReply);
+      } else if (handsFreeEnabledRef.current && voicePath && voiceSupport.canListen && !speaking) {
+        // Voice path: re-arm listening when speech queue drains
+        const rearm = () => {
+          if (!mountedRef.current || !handsFreeEnabledRef.current) return;
+          if (window.speechSynthesis && window.speechSynthesis.speaking) {
+            schedule(rearm, 120);
+          } else {
+            setVoiceStatus('Listening');
+            startListening();
+          }
+        };
+        schedule(rearm, 0);
       } else if (resumeListening) {
         setVoiceStatus('Hands-free ready');
-        schedule(() => startListening(), 150);
+        schedule(() => startListening(), 50);
       }
       if (inputRef.current) inputRef.current.focus();
     }
